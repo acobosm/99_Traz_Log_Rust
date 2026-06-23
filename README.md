@@ -9,29 +9,103 @@ Este repositorio contiene la implementación del **Producto Mínimo Viable (MVP)
 *   **Persistencia Inmutable:** Registro seguro de convocatorias, ofertas y resoluciones en la red de Solana mediante Smart Contracts construidos con **Anchor**.
 *   **Candados de Tiempo Criptográficos:** Garantiza por consenso de la red que ninguna postulación (oferta) sea admitida si se recibe un solo segundo después de la fecha límite establecida (*deadline*).
 *   **Control del Techo Presupuestario (PAC):** Validación a nivel de contrato inteligente que impide la publicación de convocatorias que excedan el presupuesto del Plan Anual de Contratación (PAC) de la institución.
-*   **Almacenamiento Descentralizado:** Subida automatizada de documentos en formato PDF (Términos de Referencia y propuestas técnicas) a **IPFS** mediante el servicio de pinning de **Pinata**.
-*   **Auditoría y Transparencia:** Trazabilidad completa del ciclo de vida del proceso (`Convocatoria Abierta` → `Recepción Cerrada` → `Proceso Adjudicado`).
+*   **Almacenamiento Descentralizado:** Subida automatizada de documentos en formato PDF/ZIP (Términos de Referencia y propuestas técnicas) a **IPFS** mediante el servicio de API JWT de **Pinata**.
+*   **Auditoría y Transparencia:** Trazabilidad completa del ciclo de vida del proceso (`Convocatoria Abierta` → `Evaluación Técnica` → `Adjudicado`).
+*   **Fondeo Automático (Airdrops):** El backend detecta si se está ejecutando localmente y financia las billeteras automáticamente con 2 SOL cada vez que se arranca.
 
 ---
 
 ## 🏗️ Arquitectura de la Solución
 
-El proyecto está estructurado de forma modular en tres componentes principales:
+El proyecto está estructurado de forma modular en los siguientes componentes:
 
 ```
 99_PFM_Traz_doc/
 ├── blockchain/          # Proyecto de Solana / Anchor (Smart Contract y Tests)
 │   ├── programs/        # Programas de Solana escritos en Rust
-│   ├── tests/           # Pruebas de integración en TypeScript
+│   │   └── blockchain/
+│   │       ├── src/lib.rs # Código consolidado (lógica, cuentas y errores)
+│   │       └── tests/   # Pruebas de integración nativas en Rust con LiteSVM
 │   └── Anchor.toml      # Configuración de Anchor
 ├── backend/             # Servidor de API REST escrito en Rust con Rocket
 │   ├── src/             # Controladores, clientes de Solana e IPFS
-│   └── Cargo.toml       # Dependencias de Rust (Rocket, Anchor client, etc.)
-├── frontend/            # Interfaz de usuario web responsiva (Dashboard de control)
-│   ├── index.html       # Estructura de la interfaz
-│   ├── style.css        # Estilos premium (Glassmorphism & Neon accent)
-│   └── app.js           # Orquestador del cliente web3 y llamadas al backend
+│   └── Cargo.toml       # Dependencias de Rust (Rocket, Solana SDK, base64, etc.)
+├── frontend/            # Interfaz de usuario React/Vite (Dashboard de control)
+│   ├── src/             # Componentes, vistas y estética Glassmorphism
+│   └── package.json     # Configuración y dependencias de React/Vite (Lucide Icons, etc.)
 └── README.md            # Guía de instalación y uso (Este archivo)
+```
+
+---
+
+## 📊 Estructura de Datos en Solana (Capa Blockchain)
+
+El programa inteligente (`blockchain/programs/blockchain/src/lib.rs`) define 4 cuentas principales indexadas mediante Program Derived Addresses (PDAs):
+
+### 1. `Institution`
+*   **Propósito:** Almacena el perfil y límites de presupuesto de la entidad contratante.
+*   **Semilla PDA:** `[b"institution", authority.key().as_ref()]`
+*   **Estructura:**
+    *   `authority: Pubkey` - Wallet con permisos de administración.
+    *   `name: String` - Nombre de la institución.
+    *   `pac_budget_limit: u64` - Techo presupuestario anual (PAC).
+    *   `pac_budget_spent: u64` - Presupuesto total comprometido a la fecha.
+
+### 2. `ProcurementProcess`
+*   **Propósito:** Representa la convocatoria pública inmutable.
+*   **Semilla PDA:** `[b"process", id.to_le_bytes().as_ref()]`
+*   **Estructura:**
+    *   `id: u64` - Identificador numérico único del proceso.
+    *   `institution: Pubkey` - Dirección de la institución convocante.
+    *   `title: String` - Título del proceso de licitación.
+    *   `referential_budget: u64` - Presupuesto referencial de la convocatoria.
+    *   `deadline: i64` - Unix timestamp límite para la recepción de ofertas.
+    *   `status: u8` - Estado (`0` = Convocatoria, `1` = Evaluación, `2` = Adjudicado).
+    *   `ipfs_tdr_hash: String` - Enlace CID al documento TDR en IPFS.
+
+### 3. `OfferAccount`
+*   **Propósito:** Registra la propuesta de un proveedor.
+*   **Semilla PDA:** `[b"offer", process.key().as_ref(), provider.key().as_ref()]`
+*   **Estructura:**
+    *   `provider: Pubkey` - Wallet del oferente.
+    *   `process_id: u64` - ID del proceso asociado.
+    *   `ipfs_proposal_hash: String` - Enlace CID a la propuesta técnica en IPFS.
+    *   `submission_timestamp: i64` - Timestamp oficial de registro en Solana.
+    *   `expertise_verified: bool` - Calificación técnica de cumplimiento de pliegos.
+
+### 4. `AwardResolution`
+*   **Propósito:** Acta de adjudicación del ganador del proceso.
+*   **Semilla PDA:** `[b"resolution", process.key().as_ref()]`
+*   **Estructura:**
+    *   `process_id: u64` - ID del proceso.
+    *   `winner_provider: Pubkey` - Wallet del proveedor adjudicado.
+    *   `winning_bid_hash: String` - CID del documento final ganador en IPFS.
+    *   `final_score_hash: String` - CID del informe final de evaluación en IPFS.
+    *   `timestamp: i64` - Timestamp de la adjudicación.
+
+---
+
+## ⚙️ Reglas de Negocio y Validación On-Chain
+
+El contrato inteligente aplica de manera determinista las siguientes restricciones:
+
+1.  **Límite Presupuestario (PAC):** Al crear un proceso, la suma del presupuesto referencial y el presupuesto ya gastado de la institución no puede exceder el límite establecido (`pac_budget_limit`). En caso de superarlo, la transacción se revierte con `BudgetExceeded`.
+2.  **Candado de Tiempo (Deadline):** No se permiten ofertas (`submit_offer`) si la hora actual registrada por el cluster de Solana (`Clock::get()?.unix_timestamp`) es superior al `deadline` del proceso. En caso contrario, se revierte con `OfferSubmissionClosed`.
+3.  **Evaluación Justa:** Solo la institución creadora del proceso puede evaluar ofertas y adjudicar, y no puede calificar u otorgar la resolución antes de que el plazo de recepción (`deadline`) haya expirado oficialmente.
+
+---
+
+## 🧪 Pruebas de Integración (LiteSVM)
+
+Las pruebas están escritas de forma nativa en Rust en la ruta `blockchain/programs/blockchain/tests/test_imtbprocurement.rs`. El set de pruebas valida de forma instantánea sin requerir un nodo validador completo corriendo en segundo plano:
+
+*   **Caso Feliz:** Registro de una institución, publicación de un proceso de compra por un monto válido, y comprobación del incremento en el gasto del PAC de la institución.
+*   **Caso Límite PAC:** Intento de crear un segundo proceso que excede el límite del PAC de la institución. El contrato aborta con la firma del error `BudgetExceeded`.
+
+Para ejecutar las pruebas:
+```bash
+cd blockchain
+cargo test
 ```
 
 ---
@@ -42,16 +116,16 @@ Antes de clonar e instalar el proyecto, asegúrate de contar con las siguientes 
 
 1.  **Rust & Cargo:** (v1.75+) `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
 2.  **Solana CLI:** (v1.18+) `sh -c "$(curl -sSfL https://release.solana.com/stable/install)"`
-3.  **Anchor CLI:** (v0.29+) `cargo install --git https://github.com/coral-xyz/anchor avm --locked --force` y luego `avm install latest`
+3.  **Anchor CLI:** (v0.30+) `cargo install --git https://github.com/coral-xyz/anchor avm --locked --force` y luego `avm install latest`
 4.  **Node.js & NPM:** (v18.0+) [Descarga oficial](https://nodejs.org/)
 
 ---
 
-## 🚀 Guía de Instalación y Configuración
+## 🚀 Guía de Instalación y Ejecución del Flujo Completo
 
-Sigue estos pasos detallados para montar el entorno de desarrollo local.
+Sigue estos pasos detallados para montar y probar todo el entorno local.
 
-### Paso 1: Configurar Solana en Modo Localnet
+### Paso 1: Configurar Solana en Modo Localnet y Lanzar el Validador
 
 1.  Establece tu configuración de Solana para usar el validador local:
     ```bash
@@ -61,74 +135,68 @@ Sigue estos pasos detallados para montar el entorno de desarrollo local.
     ```bash
     solana-keygen new --no-bip39-passphrase
     ```
-3.  Inicia el validador local de Solana en una terminal dedicada:
+3.  Lanza el validador local de Solana en una terminal separada:
     ```bash
     solana-test-validator
     ```
 
-### Paso 2: Compilar y Desplegar el Contrato Inteligente (Anchor)
+### Paso 2: Desplegar el Contrato Inteligente (Anchor)
 
 1.  Dirígete a la carpeta del contrato:
     ```bash
     cd blockchain
     ```
-2.  Instala las dependencias de TypeScript para las pruebas:
-    ```bash
-    npm install
-    ```
-3.  Compila el programa:
+2.  Compila el programa:
     ```bash
     anchor build
     ```
-4.  Obtén la dirección del programa compilado (`Program ID`):
-    ```bash
-    solana address -k target/deploy/imtbprocurement-keypair.json
-    ```
-5.  Actualiza esta clave en el archivo `Anchor.toml` y en `programs/imtbprocurement/src/lib.rs` en la macro `declare_id!`.
-6.  Despliega el contrato en tu validador local:
+3.  Despliega el programa en tu red local:
     ```bash
     anchor deploy
     ```
+    *Nota: Guarda el Program ID resultante si cambia respecto al por defecto.*
 
-### Paso 3: Configurar y Correr el Backend (Rocket)
+### Paso 3: Configurar y Lanzar el Backend (Rocket)
 
 1.  Dirígete a la carpeta del backend:
     ```bash
     cd ../backend
     ```
-2.  Crea un archivo `.env` para la integración con IPFS/Pinata (si no se proporciona, el servidor entrará en modo simulación/mock local de archivos):
+2.  Crea tu archivo `.env` configurando tu token de Pinata (deja en blanco o coméntalo si deseas usar el simulador IPFS local integrado) e identificadores de red:
     ```env
-    PINATA_JWT=tu_jwt_token_de_pinata
+    PINATA_JWT=tu_jwt_token_de_pinata_aqui
     SOLANA_RPC_URL=http://localhost:8899
-    PROGRAM_ID=Direccion_De_Tu_Program_ID
+    PROGRAM_ID=HR3UbH45KuTanX5yiNDnPnYXr19r7mNuzUPPtj6acDJJ
     ```
-3.  Inicia el servidor Rocket en modo desarrollo:
+3.  Inicia el servidor Rocket:
     ```bash
     cargo run
     ```
-    *El backend estará escuchando en `http://localhost:8000`.*
+    *El backend estará escuchando en `http://localhost:8000`. Al arrancar, financiará automáticamente con SOL las billeteras locales de los proveedores y de la autoridad en la red local.*
 
-### Paso 4: Levantar la Interfaz de Usuario (Frontend)
+### Paso 4: Levantar la Interfaz de Usuario (Frontend React)
 
 1.  Dirígete a la carpeta del frontend:
     ```bash
     cd ../frontend
     ```
-2.  Puedes servir los archivos estáticos usando cualquier servidor local simple (por ejemplo, Live Server en VS Code o usando Python):
+2.  Instala las dependencias y arranca el servidor de desarrollo Vite:
     ```bash
-    python3 -m http.server 3000
+    npm install
     ```
-3.  Abre el navegador en `http://localhost:3000` para interactuar con la aplicación.
+3.  Arranca el servidor web local:
+    ```bash
+    npm run dev
+    ```
+    *El panel estará disponible en `http://localhost:5173`.*
 
 ---
 
-## 🧪 Flujo de Pruebas y Simulación
+## 🛡️ Instrucciones para Pruebas Manuales (E2E) en el Navegador
 
-Puedes validar el ciclo de vida completo siguiendo este flujo estructurado:
+Una vez que tengas el frontend en `http://localhost:5173`, el backend en `http://localhost:8000` y el validador en `http://localhost:8899`:
 
-1.  **Sembrar Instituciones:** Llama al endpoint `/api/institutions` para registrar las cuentas de prueba ("Municipio de Quito", "Prefectura del Guayas") con sus límites presupuestarios del PAC.
-2.  **Publicar Convocatoria:** Desde la interfaz, crea un proceso asignando un presupuesto referencial (ej. $15,000) y un límite de tiempo (deadline en segundos). Sube los TDRs en PDF.
-3.  **Postulación de Proveedores:**
-    *   **Oferta 1 (Dentro de plazo):** Sube la oferta técnica del Proveedor A. El sistema generará su hash CID y la registrará con éxito en Solana.
-    *   **Oferta 2 (Fuera de plazo):** Cambia el reloj o espera a que expire el deadline e intenta subir la oferta del Proveedor B. La red Solana revertirá la transacción arrojando el error `OfferSubmissionClosed`.
-4.  **Cierre y Adjudicación:** Una vez expirado el plazo, ejecuta la fase de evaluación. El sistema verificará los requisitos, descartará proveedores con `expertise_verified = false`, adjudicará al mejor postor calificado y guardará el acta inmutable en Solana en la cuenta `AwardResolution`.
+1.  **Inicialización:** En la pestaña **Dashboard**, introduce el nombre de la institución (ej. *Ministerio de Telecomunicaciones*) y haz clic en **Registrar Entidad**. Esto enviará la transacción a Solana y creará el registro PDA.
+2.  **Crear Convocatoria:** Ve a la pestaña **Crear Proceso**, asigna un ID numérico (ej. `1`), introduce un presupuesto (ej. `10000` SOL), selecciona un tiempo límite corto (ej. *1 minuto*) y sube un archivo TDR. Haz clic en **Publicar Convocatoria en Solana**.
+3.  **Enviar Propuestas:** Ve a la pestaña **Procesos y Ofertas**, haz clic en el proceso recién creado en la columna izquierda. En la parte inferior, verás el formulario de envío. Selecciona enviar como **Proveedor A**, selecciona un archivo de propuesta y haz clic en **Subir y Firmar Oferta**. Repite el proceso para el **Proveedor B**.
+4.  **Auditoría y Adjudicación:** Espera a que expire el plazo límite (1 minuto). El estado del proceso cambiará a **Evaluación**. En la lista de ofertas recibidas, haz clic en **Aprobar Requisitos** para las propuestas válidas. Finalmente, en el formulario de adjudicación, selecciona al ganador (ej. *Proveedor A*), introduce un hash simulado para el presupuesto final y la puntuación, y haz clic en **Confirmar Adjudicación**.

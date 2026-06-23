@@ -1,0 +1,33 @@
+# Rust / Cargo
+**/target/
+target/
+Cargo.lock
+
+# Node / NPM
+**/node_modules/
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# IDEs & OS
+.vscode/
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Solana & Local Keypairs
+**/authority.json
+**/provider_a.json
+**/provider_b.json
+*id.json
+test-ledger/
+
+# Environment Variables
+.env
+.env.production
+.env.development
