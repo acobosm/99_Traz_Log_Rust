@@ -29,6 +29,7 @@
   letter-spacing: -0.03em;
   background: linear-gradient(135deg, #ffffff 30%, var(--accent-cyan) 100%);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
   display: flex;
   align-items: center;
@@ -569,3 +570,30 @@ tr:hover td {
   font-weight: 700;
   color: var(--accent-cyan);
 }
+
+/* =========================================================================
+   SOLANA WALLET ADAPTER BUTTON CUSTOMIZATION
+   ========================================================================= */
+
+.wallet-adapter-button-custom {
+  background-color: var(--accent-cyan) !important;
+  color: var(--bg-primary) !important;
+  font-family: var(--font-heading) !important;
+  font-weight: 700 !important;
+  border-radius: 8px !important;
+  height: 42px !important;
+  padding: 0 1.25rem !important;
+  font-size: 0.9rem !important;
+  box-shadow: 0 4px 14px var(--accent-cyan-glow) !important;
+  transition: all 0.2s ease-in-out !important;
+}
+
+.wallet-adapter-button-custom:hover {
+  background-color: #00bcd4 !important;
+  transform: translateY(-1px);
+}
+
+.wallet-adapter-button-trigger {
+  background-color: var(--accent-cyan) !important;
+}
+

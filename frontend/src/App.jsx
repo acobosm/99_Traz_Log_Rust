@@ -1,4 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useConnection, useWallet } from '@solana/wallet-adapter-react';
+import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
+import { Program, AnchorProvider, web3, BN } from '@coral-xyz/anchor';
+import idl from './idl.json';
 import {
   LayoutDashboard,
   PlusCircle,
@@ -20,13 +24,20 @@ import {
 import './App.css';
 
 const API_BASE = 'http://localhost:8000';
+const PROGRAM_ID = new web3.PublicKey(idl.address);
 
 function App() {
+  // Connection and Wallet
+  const { connection } = useConnection();
+  const wallet = useWallet();
+
   // Navigation
   const [activeTab, setActiveTab] = useState('dashboard');
   
-  // App States
-  const [status, setStatus] = useState(null);
+  // States
+  const [backendStatus, setBackendStatus] = useState(null);
+  const [walletBalance, setWalletBalance] = useState(0);
+  const [institution, setInstitution] = useState(null);
   const [processes, setProcesses] = useState([]);
   const [selectedProcessId, setSelectedProcessId] = useState(null);
   const [selectedProcessDetail, setSelectedProcessDetail] = useState(null);
@@ -39,20 +50,18 @@ function App() {
 
   // Form States - Initialize Institution
   const [instName, setInstName] = useState('Ministerio de Telecomunicaciones');
-  const [instPacLimit, setInstPacLimit] = useState(5000000); // 5M SOL/unidades
+  const [instPacLimit, setInstPacLimit] = useState(5000000); // 5M SOL
 
   // Form States - Create Process
   const [procId, setProcId] = useState(1);
   const [procTitle, setProcTitle] = useState('Adquisición de Servidores Cloud de Alta Performance');
-  const [procBudget, setProcBudget] = useState(1200000); // 1.2M SOL/unidades
-  const [procDeadlineSecs, setProcDeadlineSecs] = useState(3600); // 1 hora por defecto para testing
+  const [procBudget, setProcBudget] = useState(1200000); // 1.2M SOL
+  const [procDeadlineSecs, setProcDeadlineSecs] = useState(3600); // 1 hora
   const [procTdrFile, setProcTdrFile] = useState(null);
   const [procTdrBase64, setProcTdrBase64] = useState('');
   const [procTdrFileName, setProcTdrFileName] = useState('');
 
   // Form States - Submit Offer
-  const [offerProcId, setOfferProcId] = useState('');
-  const [offerProviderType, setOfferProviderType] = useState('A');
   const [offerFile, setOfferFile] = useState(null);
   const [offerBase64, setOfferBase64] = useState('');
   const [offerFileName, setOfferFileName] = useState('');
@@ -62,10 +71,47 @@ function App() {
   const [awardWinningBidHash, setAwardWinningBidHash] = useState('');
   const [awardFinalScoreHash, setAwardFinalScoreHash] = useState('');
 
-  // Copy helper
-  const copyToClipboard = (text) => {
-    navigator.clipboard.writeText(text);
-    showSuccess('¡Copiado al portapapeles!');
+  // Anchor Program Instance
+  const program = useMemo(() => {
+    if (!wallet || !wallet.publicKey) return null;
+    const provider = new AnchorProvider(connection, wallet, {
+      preflightCommitment: 'confirmed',
+    });
+    return new Program(idl, provider);
+  }, [connection, wallet]);
+
+  // Derive PDA Helpers
+  const getInstitutionPda = (authorityPubkey) => {
+    const [pda] = web3.PublicKey.findProgramAddressSync(
+      [Buffer.from('institution'), authorityPubkey.toBuffer()],
+      PROGRAM_ID
+    );
+    return pda;
+  };
+
+  const getProcessPda = (processId) => {
+    const idBuffer = new BN(processId).toArrayLike(Buffer, 'le', 8);
+    const [pda] = web3.PublicKey.findProgramAddressSync(
+      [Buffer.from('process'), idBuffer],
+      PROGRAM_ID
+    );
+    return pda;
+  };
+
+  const getOfferPda = (processPda, providerPubkey) => {
+    const [pda] = web3.PublicKey.findProgramAddressSync(
+      [Buffer.from('offer'), processPda.toBuffer(), providerPubkey.toBuffer()],
+      PROGRAM_ID
+    );
+    return pda;
+  };
+
+  const getResolutionPda = (processPda) => {
+    const [pda] = web3.PublicKey.findProgramAddressSync(
+      [Buffer.from('resolution'), processPda.toBuffer()],
+      PROGRAM_ID
+    );
+    return pda;
   };
 
   // Notification helpers
@@ -83,6 +129,12 @@ function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  // Copy helper
+  const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text);
+    showSuccess('¡Copiado al portapapeles!');
+  };
+
   // Convert File to Base64
   const handleFileChange = (e, setFile, setBase64, setFileName) => {
     const file = e.target.files[0];
@@ -94,86 +146,213 @@ function App() {
     const reader = new FileReader();
     reader.readAsDataURL(file);
     reader.onload = () => {
-      // Extract the raw base64 string
       const base64String = reader.result.split(',')[1];
       setBase64(base64String);
     };
-    reader.onerror = (err) => {
+    reader.onerror = () => {
       showError('Error al leer el archivo seleccionado');
     };
   };
 
-  // Fetch Status
-  const fetchStatus = async () => {
-    setLoading(true);
+  // Fetch Connected Wallet Balance
+  const updateWalletBalance = async () => {
+    if (!wallet.publicKey) {
+      setWalletBalance(0);
+      return;
+    }
+    try {
+      const balance = await connection.getBalance(wallet.publicKey);
+      setWalletBalance(balance / 1e9);
+    } catch (err) {
+      console.error('Error al obtener balance de wallet:', err);
+    }
+  };
+
+  // Fetch Institution Info for the connected authority
+  const fetchInstitution = async () => {
+    if (!wallet.publicKey || !program) {
+      setInstitution(null);
+      return;
+    }
+    try {
+      const pda = getInstitutionPda(wallet.publicKey);
+      const data = await program.account.institution.fetch(pda);
+      setInstitution({
+        publicKey: pda.toBase58(),
+        name: data.name,
+        pacBudgetLimit: data.pacBudgetLimit.toNumber(),
+        pacBudgetSpent: data.pacBudgetSpent.toNumber(),
+        authority: data.authority.toBase58()
+      });
+    } catch (err) {
+      // Si la cuenta no existe o falla, se setea a null
+      setInstitution(null);
+    }
+  };
+
+  // Fetch Backend Status (determina si hay backend real de IPFS)
+  const fetchBackendStatus = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/status`);
-      if (!res.ok) throw new Error('Error al obtener estado del backend');
-      const data = await res.json();
-      setStatus(data);
-    } catch (err) {
-      showError(`Backend Inalcanzable. Asegúrate de iniciar Rocket: ${err.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Fetch Processes List
-  const fetchProcesses = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/processes`);
-      if (!res.ok) throw new Error('Error al listar procesos');
-      const data = await res.json();
-      setProcesses(data);
-    } catch (err) {
-      showError(err.message);
-    }
-  };
-
-  // Fetch Single Process Detail
-  const fetchProcessDetail = async (id) => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/api/processes/${id}`);
-      if (!res.ok) throw new Error('No se pudo obtener el detalle del proceso');
-      const data = await res.json();
-      setSelectedProcessDetail(data);
-      
-      // Auto-set winner field for award form
-      if (data.offers && data.offers.length > 0) {
-        setAwardWinnerProvider(data.offers[0].provider);
+      if (res.ok) {
+        const data = await res.json();
+        setBackendStatus(data);
+      } else {
+        setBackendStatus(null);
       }
     } catch (err) {
-      showError(err.message);
+      setBackendStatus(null);
+    }
+  };
+
+  // Fetch All Procurement Processes from Solana
+  const fetchProcesses = async () => {
+    if (!program) return;
+    try {
+      const allAccs = await program.account.procurementProcess.all();
+      const mapped = allAccs.map(item => ({
+        publicKey: item.publicKey.toBase58(),
+        id: item.account.id.toNumber(),
+        institution: item.account.institution.toBase58(),
+        title: item.account.title,
+        referentialBudget: item.account.referentialBudget.toNumber(),
+        deadline: item.account.deadline.toNumber(),
+        status: item.account.status,
+        ipfsTdrHash: item.account.ipfsTdrHash,
+      }));
+      // Ordenar por ID descendente
+      mapped.sort((a, b) => b.id - a.id);
+      setProcesses(mapped);
+    } catch (err) {
+      console.error('Error al listar procesos:', err);
+    }
+  };
+
+  // Fetch Detailed Process
+  const fetchProcessDetail = async (id) => {
+    if (!program) return;
+    setLoading(true);
+    try {
+      const processPda = getProcessPda(id);
+      const processData = await program.account.procurementProcess.fetch(processPda);
+      
+      // Obtener todas las ofertas que tengan el process_id respectivo
+      const allOffers = await program.account.offerAccount.all([
+        {
+          memcmp: {
+            offset: 40, // offset del process_id en OfferAccount (8 discriminator + 32 provider)
+            bytes: new BN(id).toArrayLike(Buffer, 'le', 8).toString('base64'),
+            encoding: 'base64'
+          }
+        }
+      ]);
+      
+      const mappedOffers = allOffers.map(o => ({
+        publicKey: o.publicKey.toBase58(),
+        provider: o.account.provider.toBase58(),
+        processId: o.account.processId.toNumber(),
+        ipfsProposalHash: o.account.ipfsProposalHash,
+        submissionTimestamp: o.account.submissionTimestamp.toNumber(),
+        expertiseVerified: o.account.expertiseVerified,
+      }));
+
+      // Si el proceso está adjudicado, buscar la resolución
+      let resolution = null;
+      if (processData.status === 2) {
+        const resolutionPda = getResolutionPda(processPda);
+        try {
+          const resData = await program.account.awardResolution.fetch(resolutionPda);
+          resolution = {
+            publicKey: resolutionPda.toBase58(),
+            winnerProvider: resData.winnerProvider.toBase58(),
+            winningBidHash: resData.winningBidHash,
+            finalScoreHash: resData.finalScoreHash,
+            timestamp: resData.timestamp.toNumber(),
+          };
+        } catch (e) {
+          console.log('No se pudo leer la cuenta de resolución:', e.message);
+        }
+      }
+
+      setSelectedProcessDetail({
+        publicKey: processPda.toBase58(),
+        id: id,
+        institution: processData.institution.toBase58(),
+        title: processData.title,
+        referentialBudget: processData.referentialBudget.toNumber(),
+        deadline: processData.deadline.toNumber(),
+        status: processData.status,
+        ipfsTdrHash: processData.ipfsTdrHash,
+        offers: mappedOffers,
+        resolution: resolution,
+      });
+
+      // Poner al primer oferente como ganador tentativo en el combo
+      if (mappedOffers.length > 0) {
+        setAwardWinnerProvider(mappedOffers[0].provider);
+      }
+    } catch (err) {
+      showError(`Error al cargar detalle de proceso: ${err.message}`);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    fetchStatus();
-    fetchProcesses();
-  }, []);
-
-  // Action: Initialize Institution
-  const handleInitInstitution = async (e) => {
-    e.preventDefault();
+  // Solicitar airdrop directamente en localhost
+  const handleAirdrop = async () => {
+    if (!wallet.publicKey) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/institutions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: instName,
-          pac_budget_limit: Number(instPacLimit)
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Error al inicializar la institución');
-      showSuccess(`Institución inicializada correctamente PDA: ${data.institutionPda}`, data.signature);
-      fetchStatus();
+      const sig = await connection.requestAirdrop(wallet.publicKey, 2 * 1e9); // 2 SOL
+      await connection.confirmTransaction(sig, 'confirmed');
+      showSuccess('Airdrop de 2 SOL completado con éxito.', sig);
+      updateWalletBalance();
     } catch (err) {
-      showError(err.message);
+      showError(`Error de airdrop: ${err.message}. Asegúrate de que el validador esté corriendo.`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Efectos de carga de datos iniciales
+  useEffect(() => {
+    fetchBackendStatus();
+    if (wallet.publicKey) {
+      updateWalletBalance();
+      fetchInstitution();
+    }
+  }, [wallet.publicKey, connection]);
+
+  useEffect(() => {
+    if (program) {
+      fetchProcesses();
+    }
+  }, [program]);
+
+  // Action: Register Institution
+  const handleInitInstitution = async (e) => {
+    e.preventDefault();
+    if (!wallet.publicKey || !program) {
+      showError('Por favor conecta tu wallet de desarrollador.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const pda = getInstitutionPda(wallet.publicKey);
+      const tx = await program.methods
+        .initializeInstitution(instName, new BN(instPacLimit))
+        .accounts({
+          institution: pda,
+          authority: wallet.publicKey,
+          systemProgram: web3.SystemProgram.programId,
+        })
+        .rpc();
+
+      showSuccess(`¡Institución registrada correctamente on-chain!`, tx);
+      fetchInstitution();
+      updateWalletBalance();
+    } catch (err) {
+      showError(`Error al inicializar la institución: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -182,27 +361,68 @@ function App() {
   // Action: Create Process
   const handleCreateProcess = async (e) => {
     e.preventDefault();
+    if (!wallet.publicKey || !program) {
+      showError('Por favor conecta tu wallet.');
+      return;
+    }
     if (!procTdrBase64) {
       showError('Por favor, selecciona y sube un archivo TDR (Términos de Referencia).');
       return;
     }
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/processes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: Number(procId),
-          title: procTitle,
-          referential_budget: Number(procBudget),
-          deadline_seconds_from_now: Number(procDeadlineSecs),
-          tdr_file_base64: procTdrBase64,
-          tdr_file_name: procTdrFileName
+      // 1. Subir TDR a IPFS mediante el backend (o simulado si no hay conexión)
+      let ipfsHash;
+      try {
+        const ipfsRes = await fetch(`${API_BASE}/api/processes`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: Number(procId),
+            title: procTitle,
+            referential_budget: Number(procBudget),
+            deadline_seconds_from_now: Number(procDeadlineSecs),
+            tdr_file_base64: procTdrBase64,
+            tdr_file_name: procTdrFileName
+          })
+        });
+        if (ipfsRes.ok) {
+          const ipfsData = await ipfsRes.json();
+          ipfsHash = ipfsData.ipfsHash;
+        } else {
+          throw new Error('Error en el servicio IPFS');
+        }
+      } catch (err) {
+        console.log('Usando IPFS simulado (backend desconectado)');
+        ipfsHash = `QmMockTDR${Math.random().toString(36).substring(2, 15)}`;
+      }
+
+      // 2. Calcular deadline
+      const current_time = Math.floor(Date.now() / 1000);
+      const deadline = current_time + Number(procDeadlineSecs);
+
+      // 3. Obtener PDAs
+      const processPda = getProcessPda(procId);
+      const institutionPda = getInstitutionPda(wallet.publicKey);
+
+      // 4. Enviar transacción en Solana firmada por la Wallet
+      const tx = await program.methods
+        .initializeProcess(
+          new BN(procId),
+          procTitle,
+          new BN(procBudget),
+          new BN(deadline),
+          ipfsHash
+        )
+        .accounts({
+          process: processPda,
+          institution: institutionPda,
+          authority: wallet.publicKey,
+          systemProgram: web3.SystemProgram.programId,
         })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Error al registrar el proceso');
-      showSuccess(`Proceso de Compra #${procId} registrado con éxito. IPFS CID: ${data.ipfsHash}`, data.signature);
+        .rpc();
+
+      showSuccess(`Proceso de compra #${procId} convocado con éxito. IPFS CID: ${ipfsHash}`, tx);
       
       // Reset Form
       setProcId(procId + 1);
@@ -211,9 +431,10 @@ function App() {
       setProcTdrFileName('');
       
       fetchProcesses();
-      fetchStatus();
+      fetchInstitution();
+      updateWalletBalance();
     } catch (err) {
-      showError(err.message);
+      showError(`Error al convocar proceso: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -222,7 +443,11 @@ function App() {
   // Action: Submit Offer (Provider)
   const handleSubmitOffer = async (e) => {
     e.preventDefault();
-    const pid = offerProcId || (selectedProcessDetail ? selectedProcessDetail.id : '');
+    if (!wallet.publicKey || !program) {
+      showError('Por favor conecta tu wallet.');
+      return;
+    }
+    const pid = selectedProcessDetail ? selectedProcessDetail.id : '';
     if (!pid) {
       showError('Por favor selecciona un proceso de compra válido.');
       return;
@@ -234,65 +459,99 @@ function App() {
     
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/processes/submit_offer`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          process_id: Number(pid),
-          provider_type: offerProviderType,
-          proposal_file_base64: offerBase64,
-          proposal_file_name: offerFileName
+      // 1. Subir a IPFS
+      let ipfsHash;
+      try {
+        const ipfsRes = await fetch(`${API_BASE}/api/processes/submit_offer`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            process_id: Number(pid),
+            provider_type: "A", // Backend de subida genérico
+            proposal_file_base64: offerBase64,
+            proposal_file_name: offerFileName
+          })
+        });
+        if (ipfsRes.ok) {
+          const ipfsData = await ipfsRes.json();
+          ipfsHash = ipfsData.ipfsHash;
+        } else {
+          throw new Error('Error al subir propuesta a IPFS');
+        }
+      } catch (err) {
+        console.log('Usando IPFS simulado (backend desconectado)');
+        ipfsHash = `QmMockProposal${Math.random().toString(36).substring(2, 15)}`;
+      }
+
+      // 2. Obtener PDAs
+      const processPda = getProcessPda(pid);
+      const offerPda = getOfferPda(processPda, wallet.publicKey);
+
+      // 3. Firmar y enviar transacción con la wallet
+      const tx = await program.methods
+        .submitOffer(new BN(pid), ipfsHash)
+        .accounts({
+          offer: offerPda,
+          process: processPda,
+          provider: wallet.publicKey,
+          systemProgram: web3.SystemProgram.programId,
         })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Error al enviar la oferta');
-      showSuccess(`Oferta enviada con éxito para el Proceso #${pid}. IPFS CID: ${data.ipfsHash}`, data.signature);
+        .rpc();
+
+      showSuccess(`Oferta enviada con éxito para el Proceso #${pid}. IPFS CID: ${ipfsHash}`, tx);
       
       // Reset Form
       setOfferFile(null);
       setOfferBase64('');
       setOfferFileName('');
       
-      if (selectedProcessDetail && selectedProcessDetail.id === Number(pid)) {
-        fetchProcessDetail(pid);
-      }
-      fetchStatus();
+      fetchProcessDetail(pid);
+      updateWalletBalance();
     } catch (err) {
-      showError(err.message);
+      showError(`Error al presentar la propuesta técnica: ${err.message}`);
     } finally {
       setLoading(false);
     }
   };
 
-  // Action: Verify Offer Expertise (Admin)
-  const handleVerifyOffer = async (providerAddress, verified) => {
-    if (!selectedProcessDetail) return;
+  // Action: Verify Offer Expertise (Admin / Institution Authority)
+  const handleVerifyOffer = async (providerAddressStr, verified) => {
+    if (!selectedProcessDetail || !wallet.publicKey || !program) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/processes/verify_offer`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          process_id: Number(selectedProcessDetail.id),
-          provider: providerAddress,
-          verified: verified
+      const providerPubkey = new web3.PublicKey(providerAddressStr);
+      const processPda = getProcessPda(selectedProcessDetail.id);
+      const offerPda = getOfferPda(processPda, providerPubkey);
+      const institutionPda = getInstitutionPda(wallet.publicKey);
+
+      const tx = await program.methods
+        .verifyOfferExpertise(
+          new BN(selectedProcessDetail.id),
+          providerPubkey,
+          verified
+        )
+        .accounts({
+          offer: offerPda,
+          process: processPda,
+          institution: institutionPda,
+          authority: wallet.publicKey,
         })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Error al calificar oferta');
-      showSuccess(`Calificación de la oferta registrada con éxito (${verified ? 'Aprobado' : 'Rechazado'}).`, data.signature);
+        .rpc();
+
+      showSuccess(`Calificación de la oferta registrada con éxito (${verified ? 'Aprobado' : 'Rechazado'}).`, tx);
       fetchProcessDetail(selectedProcessDetail.id);
+      updateWalletBalance();
     } catch (err) {
-      showError(err.message);
+      showError(`Error al calificar oferta: ${err.message}`);
     } finally {
       setLoading(false);
     }
   };
 
-  // Action: Award Process (Admin)
+  // Action: Award Process (Admin / Institution Authority)
   const handleAwardProcess = async (e) => {
     e.preventDefault();
-    if (!selectedProcessDetail) return;
+    if (!selectedProcessDetail || !wallet.publicKey || !program) return;
     if (!awardWinnerProvider) {
       showError('Por favor selecciona el proveedor ganador.');
       return;
@@ -304,19 +563,30 @@ function App() {
     
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/processes/award`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          process_id: Number(selectedProcessDetail.id),
-          winner_provider: awardWinnerProvider,
-          winning_bid_hash: awardWinningBidHash,
-          final_score_hash: awardFinalScoreHash
+      const winnerPubkey = new web3.PublicKey(awardWinnerProvider);
+      const processPda = getProcessPda(selectedProcessDetail.id);
+      const winnerOfferPda = getOfferPda(processPda, winnerPubkey);
+      const resolutionPda = getResolutionPda(processPda);
+      const institutionPda = getInstitutionPda(wallet.publicKey);
+
+      const tx = await program.methods
+        .evaluateAndAward(
+          new BN(selectedProcessDetail.id),
+          winnerPubkey,
+          awardWinningBidHash,
+          awardFinalScoreHash
+        )
+        .accounts({
+          resolution: resolutionPda,
+          process: processPda,
+          winnerOffer: winnerOfferPda,
+          institution: institutionPda,
+          authority: wallet.publicKey,
+          systemProgram: web3.SystemProgram.programId,
         })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Error al adjudicar el proceso');
-      showSuccess(`¡Proceso #${selectedProcessDetail.id} adjudicado exitosamente!`, data.signature);
+        .rpc();
+
+      showSuccess(`¡Proceso #${selectedProcessDetail.id} adjudicado exitosamente!`, tx);
       
       // Reset Form
       setAwardWinningBidHash('');
@@ -324,15 +594,15 @@ function App() {
       
       fetchProcessDetail(selectedProcessDetail.id);
       fetchProcesses();
-      fetchStatus();
+      updateWalletBalance();
     } catch (err) {
-      showError(err.message);
+      showError(`Error al adjudicar el proceso: ${err.message}`);
     } finally {
       setLoading(false);
     }
   };
 
-  // Status mapping
+  // Mapeo de estados del proceso
   const getStatusLabel = (statusCode) => {
     switch (statusCode) {
       case 0: return { label: 'Convocatoria Abierta', class: 'convocatoria' };
@@ -342,7 +612,7 @@ function App() {
     }
   };
 
-  // Time formatter
+  // Formato de fechas
   const formatDeadline = (timestamp) => {
     const date = new Date(timestamp * 1000);
     const now = new Date();
@@ -367,12 +637,15 @@ function App() {
           <h1>🛡️ IMtBProcurement</h1>
           <p>Consola de Administración de Contratación Pública Transparente e Inmutable en Solana</p>
         </div>
-        {status && (
+        
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
           <div className="ipfs-status-badge">
-            <div className={`indicator ${status.ipfsMode.includes('Simulado') ? 'simulated' : ''}`}></div>
-            <span>IPFS: {status.ipfsMode}</span>
+            <div className={`indicator ${backendStatus ? '' : 'simulated'}`}></div>
+            <span>IPFS: {backendStatus ? backendStatus.ipfsMode : 'Simulado (Sin Backend)'}</span>
           </div>
-        )}
+          {/* BOTÓN DE WALLET OFICIAL */}
+          <WalletMultiButton className="wallet-adapter-button-custom" />
+        </div>
       </header>
 
       {/* GLOBAL NOTIFICATION SECTION */}
@@ -415,7 +688,7 @@ function App() {
       <nav className="tabs-navigation">
         <button
           className={`tab-btn ${activeTab === 'dashboard' ? 'active' : ''}`}
-          onClick={() => { setActiveTab('dashboard'); fetchStatus(); }}
+          onClick={() => { setActiveTab('dashboard'); if (wallet.publicKey) { updateWalletBalance(); fetchInstitution(); } }}
         >
           <LayoutDashboard size={18} />
           Dashboard
@@ -423,7 +696,7 @@ function App() {
         <button
           className={`tab-btn ${activeTab === 'create-process' ? 'active' : ''}`}
           onClick={() => { setActiveTab('create-process'); }}
-          disabled={status && !status.authority.institution}
+          disabled={!wallet.publicKey || !institution}
         >
           <PlusCircle size={18} />
           Crear Proceso (Admin)
@@ -443,133 +716,111 @@ function App() {
           
           {/* WALLET STATUS AREA */}
           <div className="glass-card">
-            <h2 className="glass-card-title"><Coins size={20} /> Cuentas y Saldos del Sistema (Localnet)</h2>
-            {status ? (
-              <div className="wallets-grid">
-                
-                {/* Authority Wallet */}
-                <div className="wallet-item authority">
+            <h2 className="glass-card-title"><Coins size={20} /> Tu Billetera Conectada (Localnet)</h2>
+            {wallet.publicKey ? (
+              <div className="wallets-grid" style={{ gridTemplateColumns: '1fr' }}>
+                <div className={`wallet-item ${institution ? 'authority' : 'provider-a'}`}>
                   <div className="wallet-header">
-                    <span className="wallet-role" style={{ color: 'var(--accent-cyan)' }}>Autoridad Institucional</span>
-                    <Shield size={16} color="var(--accent-cyan)" />
+                    <span className="wallet-role" style={{ color: institution ? 'var(--accent-cyan)' : 'var(--accent-green)' }}>
+                      {institution ? 'Autoridad Pública Registrada' : 'Proveedor / Licitante Público'}
+                    </span>
+                    <Shield size={16} color={institution ? 'var(--accent-cyan)' : 'var(--accent-green)'} />
                   </div>
                   <div className="wallet-balance">
-                    {status.authority.balance.toFixed(4)} <span>SOL</span>
+                    {walletBalance.toFixed(4)} <span>SOL</span>
                   </div>
-                  <div className="wallet-address">
-                    {status.authority.publicKey.slice(0, 10)}...{status.authority.publicKey.slice(-10)}
-                    <button className="copy-btn" onClick={() => copyToClipboard(status.authority.publicKey)}>
-                      <Copy size={12} />
+                  
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem' }}>
+                    <div className="wallet-address">
+                      {wallet.publicKey.toBase58().slice(0, 12)}...{wallet.publicKey.toBase58().slice(-12)}
+                      <button className="copy-btn" onClick={() => copyToClipboard(wallet.publicKey.toBase58())}>
+                        <Copy size={12} />
+                      </button>
+                    </div>
+                    
+                    <button className="btn btn-secondary" onClick={handleAirdrop} disabled={loading} style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}>
+                      {loading ? 'Fondeando...' : 'Solicitar +2 SOL Airdrop'}
                     </button>
                   </div>
                 </div>
-
-                {/* Provider A Wallet */}
-                <div className="wallet-item provider-a">
-                  <div className="wallet-header">
-                    <span className="wallet-role" style={{ color: 'var(--accent-green)' }}>Proveedor A</span>
-                    <Coins size={16} color="var(--accent-green)" />
-                  </div>
-                  <div className="wallet-balance">
-                    {status.providerA.balance.toFixed(4)} <span>SOL</span>
-                  </div>
-                  <div className="wallet-address">
-                    {status.providerA.publicKey.slice(0, 10)}...{status.providerA.publicKey.slice(-10)}
-                    <button className="copy-btn" onClick={() => copyToClipboard(status.providerA.publicKey)}>
-                      <Copy size={12} />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Provider B Wallet */}
-                <div className="wallet-item provider-b">
-                  <div className="wallet-header">
-                    <span className="wallet-role" style={{ color: 'var(--accent-orange)' }}>Proveedor B</span>
-                    <Coins size={16} color="var(--accent-orange)" />
-                  </div>
-                  <div className="wallet-balance">
-                    {status.providerB.balance.toFixed(4)} <span>SOL</span>
-                  </div>
-                  <div className="wallet-address">
-                    {status.providerB.publicKey.slice(0, 10)}...{status.providerB.publicKey.slice(-10)}
-                    <button className="copy-btn" onClick={() => copyToClipboard(status.providerB.publicKey)}>
-                      <Copy size={12} />
-                    </button>
-                  </div>
-                </div>
-
               </div>
             ) : (
-              <div style={{ textAlign: 'center', padding: '1rem' }}>
-                <div className="loader"></div>
-                <p style={{ marginTop: '0.5rem' }}>Cargando estado de la red...</p>
+              <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>
+                <Shield size={48} style={{ margin: '0 auto 1rem', opacity: 0.3 }} />
+                <h3>Billetera no conectada</h3>
+                <p style={{ marginTop: '0.5rem', marginBottom: '1.5rem' }}>Conecta tu wallet de Phantom en el botón superior derecho para interactuar con la red.</p>
+                <div style={{ display: 'inline-block' }}>
+                  <WalletMultiButton />
+                </div>
               </div>
             )}
           </div>
-
+ 
           {/* INSTITUTION INITIALIZATION / CONFIG */}
-          <div className="glass-card">
-            <h2 className="glass-card-title"><Shield size={20} /> Institución Pública Registrada en Blockchain</h2>
-            {status && status.authority.institution ? (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.5rem', padding: '0.5rem' }}>
-                <div className="meta-row">
-                  <span className="meta-label">Nombre Institucional</span>
-                  <span className="meta-value" style={{ fontSize: '1.25rem', fontWeight: '700' }}>
-                    {status.authority.institution.name}
-                  </span>
-                </div>
-                <div className="meta-row">
-                  <span className="meta-label">Límite Presupuestario PAC</span>
-                  <span className="meta-value" style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--accent-cyan)' }}>
-                    {status.authority.institution.pacBudgetLimit.toLocaleString()} SOL
-                  </span>
-                </div>
-                <div className="meta-row">
-                  <span className="meta-label">Presupuesto Comprometido / Devengado</span>
-                  <span className="meta-value" style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--accent-orange)' }}>
-                    {status.authority.institution.pacBudgetSpent.toLocaleString()} SOL
-                  </span>
-                </div>
-                <div className="meta-row">
-                  <span className="meta-label">Dirección PDA On-Chain</span>
-                  <span className="meta-value mono" style={{ fontSize: '0.8rem' }}>
-                    {status.authority.institution.publicKey}
-                  </span>
-                </div>
-              </div>
-            ) : (
-              <div>
-                <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-                  No se detecta ninguna institución pública registrada para tu clave de Autoridad. Registra tu institución ahora para activar la emisión de procesos de contratación.
-                </p>
-                <form onSubmit={handleInitInstitution} className="form-grid">
-                  <div className="form-group">
-                    <label>Nombre de la Entidad Pública</label>
-                    <input
-                      type="text"
-                      value={instName}
-                      onChange={(e) => setInstName(e.target.value)}
-                      required
-                    />
+          {wallet.publicKey && (
+            <div className="glass-card">
+              <h2 className="glass-card-title"><Shield size={20} /> Institución Pública Asociada a tu Wallet</h2>
+              {institution ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.5rem', padding: '0.5rem' }}>
+                  <div className="meta-row">
+                    <span className="meta-label">Nombre de la Entidad</span>
+                    <span className="meta-value" style={{ fontSize: '1.25rem', fontWeight: '700' }}>
+                      {institution.name}
+                    </span>
                   </div>
-                  <div className="form-group">
-                    <label>Límite Techo Anual PAC (SOL)</label>
-                    <input
-                      type="number"
-                      value={instPacLimit}
-                      onChange={(e) => setInstPacLimit(e.target.value)}
-                      required
-                    />
+                  <div className="meta-row">
+                    <span className="meta-label">Límite Presupuestario PAC</span>
+                    <span className="meta-value" style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--accent-cyan)' }}>
+                      {institution.pacBudgetLimit.toLocaleString()} SOL
+                    </span>
                   </div>
-                  <div className="form-group" style={{ display: 'flex', alignItems: 'flex-end' }}>
-                    <button type="submit" className="btn btn-primary" style={{ width: '100%' }} disabled={loading}>
-                      {loading ? <div className="loader"></div> : 'Registrar Entidad'}
-                    </button>
+                  <div className="meta-row">
+                    <span className="meta-label">Presupuesto Devengado</span>
+                    <span className="meta-value" style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--accent-orange)' }}>
+                      {institution.pacBudgetSpent.toLocaleString()} SOL
+                    </span>
                   </div>
-                </form>
-              </div>
-            )}
-          </div>
+                  <div className="meta-row">
+                    <span className="meta-label">Dirección PDA On-Chain</span>
+                    <span className="meta-value mono" style={{ fontSize: '0.8rem' }}>
+                      {institution.publicKey}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>
+                    Tu billetera no está registrada como una Autoridad de Licitación. Si representas a una Entidad Gubernamental, puedes registrarla en Solana completando el siguiente formulario.
+                  </p>
+                  <form onSubmit={handleInitInstitution} className="form-grid">
+                    <div className="form-group">
+                      <label>Nombre de la Entidad Pública</label>
+                      <input
+                        type="text"
+                        value={instName}
+                        onChange={(e) => setInstName(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Límite Techo Anual PAC (SOL)</label>
+                      <input
+                        type="number"
+                        value={instPacLimit}
+                        onChange={(e) => setInstPacLimit(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="form-group" style={{ display: 'flex', alignItems: 'flex-end' }}>
+                      <button type="submit" className="btn btn-primary" style={{ width: '100%' }} disabled={loading}>
+                        {loading ? <div className="loader"></div> : 'Registrar Entidad Gubernamental'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* DOCUMENTACIÓN / AYUDA */}
           <div className="glass-card">
@@ -788,7 +1039,7 @@ function App() {
                         <div>
                           <a
                             href={
-                              status && status.ipfsMode.includes('Real')
+                              backendStatus
                                 ? `https://gateway.pinata.cloud/ipfs/${selectedProcessDetail.ipfsTdrHash}`
                                 : '#'
                             }
@@ -830,7 +1081,7 @@ function App() {
                           <span className="meta-label">CID Presupuesto Definitivo (IPFS)</span>
                           <span className="meta-value mono">
                             <a
-                              href={status && status.ipfsMode.includes('Real') ? `https://gateway.pinata.cloud/ipfs/${selectedProcessDetail.resolution.winningBidHash}` : '#'}
+                              href={backendStatus ? `https://gateway.pinata.cloud/ipfs/${selectedProcessDetail.resolution.winningBidHash}` : '#'}
                               target="_blank"
                               rel="noreferrer"
                               className="ipfs-link"
@@ -843,7 +1094,7 @@ function App() {
                           <span className="meta-label">CID Acta de Puntuación Final (IPFS)</span>
                           <span className="meta-value mono">
                             <a
-                              href={status && status.ipfsMode.includes('Real') ? `https://gateway.pinata.cloud/ipfs/${selectedProcessDetail.resolution.finalScoreHash}` : '#'}
+                              href={backendStatus ? `https://gateway.pinata.cloud/ipfs/${selectedProcessDetail.resolution.finalScoreHash}` : '#'}
                               target="_blank"
                               rel="noreferrer"
                               className="ipfs-link"
@@ -867,11 +1118,9 @@ function App() {
                           <div className="offer-header">
                             <span style={{ fontWeight: '700', fontSize: '0.85rem' }}>
                               Proveedor:{' '}
-                              {status && offer.provider === status.providerA.publicKey
-                                ? 'Proveedor A'
-                                : status && offer.provider === status.providerB.publicKey
-                                ? 'Proveedor B'
-                                : `${offer.provider.slice(0, 6)}...${offer.provider.slice(-6)}`}
+                              {wallet.publicKey && offer.provider === wallet.publicKey.toBase58()
+                                ? 'Tu Wallet (Tú)'
+                                : `${offer.provider.slice(0, 10)}...${offer.provider.slice(-10)}`}
                             </span>
                             <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                               Enviado: {new Date(offer.submissionTimestamp * 1000).toLocaleTimeString()}
@@ -881,7 +1130,7 @@ function App() {
                             <div className="meta-row">
                               <span className="meta-label">Propuesta Técnica / Económica (IPFS)</span>
                               <a
-                                href={status && status.ipfsMode.includes('Real') ? `https://gateway.pinata.cloud/ipfs/${offer.ipfsProposalHash}` : '#'}
+                                href={backendStatus ? `https://gateway.pinata.cloud/ipfs/${offer.ipfsProposalHash}` : '#'}
                                 target="_blank"
                                 rel="noreferrer"
                                 className="ipfs-link"
@@ -906,7 +1155,7 @@ function App() {
                           </div>
 
                           {/* ACTION: QUALIFY/VERIFY OFFER EXPERTISE (ONLY AUTHORITY ADMIN) */}
-                          {selectedProcessDetail.status === 1 && (
+                          {selectedProcessDetail.status === 1 && institution && wallet.publicKey && selectedProcessDetail.institution === institution.publicKey && (
                             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.02)', paddingTop: '0.5rem' }}>
                               <button
                                 className="btn btn-danger"
@@ -937,22 +1186,12 @@ function App() {
                 </div>
 
                 {/* SUBMIT NEW OFFER (IF ACTIVE STATUS == 0 AND NOT MET DEADLINE) */}
-                {selectedProcessDetail.status === 0 && (
+                {selectedProcessDetail.status === 0 && wallet.publicKey && (
                   <div className="glass-card">
                     <h2 className="glass-card-title"><UploadCloud size={20} /> Presentar Propuesta (Portal de Proveedores)</h2>
                     <form onSubmit={handleSubmitOffer} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                       <div className="form-grid">
-                        <div className="form-group">
-                          <label>Enviar como Proveedor:</label>
-                          <select
-                            value={offerProviderType}
-                            onChange={(e) => setOfferProviderType(e.target.value)}
-                          >
-                            <option value="A">Proveedor A</option>
-                            <option value="B">Proveedor B</option>
-                          </select>
-                        </div>
-                        <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                        <div className="form-group" style={{ gridColumn: 'span 3' }}>
                           <label>Documento de Oferta Técnica/Económica (PDF, ZIP)</label>
                           <div className="file-upload-zone" style={{ padding: '1rem' }}>
                             <UploadCloud size={24} />
@@ -987,7 +1226,7 @@ function App() {
                 )}
 
                 {/* AWARD PROCESS FORM (IF STATUS == 1 (EVALUATION)) */}
-                {selectedProcessDetail.status === 1 && (
+                {selectedProcessDetail.status === 1 && institution && wallet.publicKey && selectedProcessDetail.institution === institution.publicKey && (
                   <div className="glass-card" style={{ border: '1px solid var(--accent-orange)' }}>
                     <h2 className="glass-card-title" style={{ color: 'var(--accent-orange)' }}><Award size={20} /> Resolución de Adjudicación (Comité de Compras)</h2>
                     <form onSubmit={handleAwardProcess} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -1002,11 +1241,7 @@ function App() {
                             <option value="">-- Seleccionar Ganador --</option>
                             {selectedProcessDetail.offers && selectedProcessDetail.offers.map(o => (
                               <option key={o.provider} value={o.provider}>
-                                {status && o.provider === status.providerA.publicKey
-                                  ? 'Proveedor A'
-                                  : status && o.provider === status.providerB.publicKey
-                                  ? 'Proveedor B'
-                                  : o.provider}
+                                {o.provider.slice(0, 12)}...{o.provider.slice(-12)}
                               </option>
                             ))}
                           </select>
@@ -1059,12 +1294,10 @@ function App() {
 
       {/* FOOTER METADATA */}
       <footer style={{ marginTop: 'auto', paddingTop: '2rem', borderTop: '1px solid var(--border-color)', textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-        <p>Tesis de Maestría en Blockchain & Web3 - Desarrollado en Rust y Rocket (Backend) + Anchor y Solana (Smart Program) + Vite & React (Frontend)</p>
-        {status && (
-          <p style={{ marginTop: '0.25rem', fontFamily: 'var(--font-mono)' }}>
-            Program ID: {status.programId}
-          </p>
-        )}
+        <p>Tesis de Maestría en Blockchain & Web3 - Desarrollado en Rust y Rocket (Backend de IPFS) + Anchor y Solana (Smart Program) + Vite & React (Frontend)</p>
+        <p style={{ marginTop: '0.25rem', fontFamily: 'var(--font-mono)' }}>
+          Program ID: {PROGRAM_ID.toBase58()}
+        </p>
       </footer>
     </div>
   );

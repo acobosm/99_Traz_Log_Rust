@@ -1,0 +1,718 @@
+{
+  "address": "HR3UbH45KuTanX5yiNDnPnYXr19r7mNuzUPPtj6acDJJ",
+  "metadata": {
+    "name": "blockchain",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "evaluate_and_award",
+      "discriminator": [
+        122,
+        173,
+        59,
+        208,
+        0,
+        135,
+        155,
+        78
+      ],
+      "accounts": [
+        {
+          "name": "resolution",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  115,
+                  111,
+                  108,
+                  117,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "process"
+              }
+            ]
+          }
+        },
+        {
+          "name": "process",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  99,
+                  101,
+                  115,
+                  115
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "process_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "winner_offer",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  102,
+                  102,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "process"
+              },
+              {
+                "kind": "arg",
+                "path": "winner_provider"
+              }
+            ]
+          }
+        },
+        {
+          "name": "institution",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  110,
+                  115,
+                  116,
+                  105,
+                  116,
+                  117,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "institution"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "process_id",
+          "type": "u64"
+        },
+        {
+          "name": "winner_provider",
+          "type": "pubkey"
+        },
+        {
+          "name": "winning_bid_hash",
+          "type": "string"
+        },
+        {
+          "name": "final_score_hash",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "initialize_institution",
+      "discriminator": [
+        215,
+        227,
+        156,
+        118,
+        242,
+        6,
+        200,
+        100
+      ],
+      "accounts": [
+        {
+          "name": "institution",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  110,
+                  115,
+                  116,
+                  105,
+                  116,
+                  117,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "pac_budget_limit",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "initialize_process",
+      "discriminator": [
+        1,
+        183,
+        233,
+        196,
+        159,
+        225,
+        81,
+        105
+      ],
+      "accounts": [
+        {
+          "name": "process",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  99,
+                  101,
+                  115,
+                  115
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "institution",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  110,
+                  115,
+                  116,
+                  105,
+                  116,
+                  117,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "institution"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "id",
+          "type": "u64"
+        },
+        {
+          "name": "title",
+          "type": "string"
+        },
+        {
+          "name": "referential_budget",
+          "type": "u64"
+        },
+        {
+          "name": "deadline",
+          "type": "i64"
+        },
+        {
+          "name": "ipfs_tdr_hash",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "submit_offer",
+      "discriminator": [
+        105,
+        236,
+        48,
+        183,
+        5,
+        232,
+        209,
+        77
+      ],
+      "accounts": [
+        {
+          "name": "offer",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  102,
+                  102,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "process"
+              },
+              {
+                "kind": "account",
+                "path": "provider"
+              }
+            ]
+          }
+        },
+        {
+          "name": "process",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  99,
+                  101,
+                  115,
+                  115
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "process_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "provider",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "process_id",
+          "type": "u64"
+        },
+        {
+          "name": "ipfs_proposal_hash",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "verify_offer_expertise",
+      "discriminator": [
+        77,
+        200,
+        188,
+        91,
+        241,
+        69,
+        135,
+        94
+      ],
+      "accounts": [
+        {
+          "name": "offer",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  102,
+                  102,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "process"
+              },
+              {
+                "kind": "arg",
+                "path": "provider"
+              }
+            ]
+          }
+        },
+        {
+          "name": "process",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  99,
+                  101,
+                  115,
+                  115
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "process_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "institution",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  110,
+                  115,
+                  116,
+                  105,
+                  116,
+                  117,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "institution"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "_process_id",
+          "type": "u64"
+        },
+        {
+          "name": "_provider",
+          "type": "pubkey"
+        },
+        {
+          "name": "verified",
+          "type": "bool"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "AwardResolution",
+      "discriminator": [
+        189,
+        27,
+        199,
+        16,
+        89,
+        185,
+        146,
+        6
+      ]
+    },
+    {
+      "name": "Institution",
+      "discriminator": [
+        178,
+        67,
+        44,
+        135,
+        26,
+        236,
+        199,
+        188
+      ]
+    },
+    {
+      "name": "OfferAccount",
+      "discriminator": [
+        152,
+        98,
+        9,
+        183,
+        115,
+        190,
+        31,
+        201
+      ]
+    },
+    {
+      "name": "ProcurementProcess",
+      "discriminator": [
+        50,
+        75,
+        222,
+        132,
+        134,
+        160,
+        231,
+        136
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "BudgetExceeded",
+      "msg": "El presupuesto referencial excede el techo del PAC de la institucion."
+    },
+    {
+      "code": 6001,
+      "name": "InvalidDeadline",
+      "msg": "La fecha limite (deadline) debe estar en el futuro."
+    },
+    {
+      "code": 6002,
+      "name": "OfferSubmissionClosed",
+      "msg": "La recepcion de ofertas esta cerrada para este proceso."
+    },
+    {
+      "code": 6003,
+      "name": "ProcessNotReadyForEvaluation",
+      "msg": "El plazo de recepcion aun no ha expirado; no se puede calificar."
+    },
+    {
+      "code": 6004,
+      "name": "InvalidStatusTransition",
+      "msg": "El proceso no se encuentra en el estado adecuado para esta operacion."
+    }
+  ],
+  "types": [
+    {
+      "name": "AwardResolution",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "process_id",
+            "type": "u64"
+          },
+          {
+            "name": "winner_provider",
+            "type": "pubkey"
+          },
+          {
+            "name": "winning_bid_hash",
+            "type": "string"
+          },
+          {
+            "name": "final_score_hash",
+            "type": "string"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Institution",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "pac_budget_limit",
+            "type": "u64"
+          },
+          {
+            "name": "pac_budget_spent",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OfferAccount",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "provider",
+            "type": "pubkey"
+          },
+          {
+            "name": "process_id",
+            "type": "u64"
+          },
+          {
+            "name": "ipfs_proposal_hash",
+            "type": "string"
+          },
+          {
+            "name": "submission_timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "expertise_verified",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProcurementProcess",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "id",
+            "type": "u64"
+          },
+          {
+            "name": "institution",
+            "type": "pubkey"
+          },
+          {
+            "name": "title",
+            "type": "string"
+          },
+          {
+            "name": "referential_budget",
+            "type": "u64"
+          },
+          {
+            "name": "deadline",
+            "type": "i64"
+          },
+          {
+            "name": "status",
+            "type": "u8"
+          },
+          {
+            "name": "ipfs_tdr_hash",
+            "type": "string"
+          }
+        ]
+      }
+    }
+  ]
+}

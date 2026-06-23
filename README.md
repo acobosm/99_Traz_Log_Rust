@@ -1,17 +1,17 @@
-# IMtBProcurement Ec (Immutable Procurement MVP)
+# IMtBProcurement Ec (Immutable Procurement DApp)
 
-Este repositorio contiene la implementación del **Producto Mínimo Viable (MVP)** para un **Sistema Inmutable y Transparente para la Fase Precontractual de Contratación Pública en Ecuador**, basado en una arquitectura descentralizada que combina la blockchain de **Solana**, un backend de orquestación en **Rust/Rocket** y almacenamiento descentralizado en **IPFS**.
+Este repositorio contiene la implementación del **Producto Mínimo Viable (MVP)** para un **Sistema Inmutable y Transparente para la Fase Precontractual de Contratación Pública en Ecuador**, basado en una arquitectura descentralizada Web3 real que combina la blockchain de **Solana**, un cliente **Anchor (JavaScript)** integrado en el frontend, un backend microservicio en **Rust/Rocket** para IPFS y almacenamiento descentralizado.
 
 ---
 
 ## 🌟 Características Clave
 
 *   **Persistencia Inmutable:** Registro seguro de convocatorias, ofertas y resoluciones en la red de Solana mediante Smart Contracts construidos con **Anchor**.
-*   **Candados de Tiempo Criptográficos:** Garantiza por consenso de la red que ninguna postulación (oferta) sea admitida si se recibe un solo segundo después de la fecha límite establecida (*deadline*).
+*   **Firma Digital Descentralizada (Web3):** Integración con **Solana Wallet Adapter** en el navegador para que los usuarios (Autoridad e Instituciones/Proveedores) firmen transacciones directamente con billeteras Web3 reales como **Phantom** o **Solflare**.
+*   **Candados de Tiempo Criptográficos:** Garantiza por consenso de la red que ninguna postulación (oferta) sea admitida si se recibe después de la fecha límite establecida (*deadline*).
 *   **Control del Techo Presupuestario (PAC):** Validación a nivel de contrato inteligente que impide la publicación de convocatorias que excedan el presupuesto del Plan Anual de Contratación (PAC) de la institución.
-*   **Almacenamiento Descentralizado:** Subida automatizada de documentos en formato PDF/ZIP (Términos de Referencia y propuestas técnicas) a **IPFS** mediante el servicio de API JWT de **Pinata**.
+*   **Almacenamiento Descentralizado Seguro:** Subida de documentos en formato PDF/ZIP (Términos de Referencia y propuestas técnicas) a **IPFS** cifrados temporalmente o guardados a través del backend para proteger las credenciales JWT de **Pinata**.
 *   **Auditoría y Transparencia:** Trazabilidad completa del ciclo de vida del proceso (`Convocatoria Abierta` → `Evaluación Técnica` → `Adjudicado`).
-*   **Fondeo Automático (Airdrops):** El backend detecta si se está ejecutando localmente y financia las billeteras automáticamente con 2 SOL cada vez que se arranca.
 
 ---
 
@@ -27,12 +27,15 @@ El proyecto está estructurado de forma modular en los siguientes componentes:
 │   │       ├── src/lib.rs # Código consolidado (lógica, cuentas y errores)
 │   │       └── tests/   # Pruebas de integración nativas en Rust con LiteSVM
 │   └── Anchor.toml      # Configuración de Anchor
-├── backend/             # Servidor de API REST escrito en Rust con Rocket
-│   ├── src/             # Controladores, clientes de Solana e IPFS
-│   └── Cargo.toml       # Dependencias de Rust (Rocket, Solana SDK, base64, etc.)
-├── frontend/            # Interfaz de usuario React/Vite (Dashboard de control)
+├── backend/             # Servidor de API / Puente IPFS escrito en Rust con Rocket
+│   ├── src/             # Controladores y clientes de IPFS/Pinata
+│   └── Cargo.toml       # Dependencias de Rust (Rocket, reqwest, base64, uuid, etc.)
+├── frontend/            # Interfaz de usuario React/Vite (DApp Web3 Real)
 │   ├── src/             # Componentes, vistas y estética Glassmorphism
-│   └── package.json     # Configuración y dependencias de React/Vite (Lucide Icons, etc.)
+│   │   ├── idl.json     # Copia del IDL autogenerado por Anchor
+│   │   ├── main.jsx     # Configuración de los adaptadores de Wallet
+│   │   └── App.jsx      # Lógica de la DApp y llamadas al programa Solana
+│   └── package.json     # Configuración y dependencias de React/Vite (Wallet adapters, Anchor Client, etc.)
 └── README.md            # Guía de instalación y uso (Este archivo)
 ```
 
@@ -46,7 +49,7 @@ El programa inteligente (`blockchain/programs/blockchain/src/lib.rs`) define 4 c
 *   **Propósito:** Almacena el perfil y límites de presupuesto de la entidad contratante.
 *   **Semilla PDA:** `[b"institution", authority.key().as_ref()]`
 *   **Estructura:**
-    *   `authority: Pubkey` - Wallet con permisos de administración.
+    *   `authority: Pubkey` - Wallet del administrador de la institución.
     *   `name: String` - Nombre de la institución.
     *   `pac_budget_limit: u64` - Techo presupuestario anual (PAC).
     *   `pac_budget_spent: u64` - Presupuesto total comprometido a la fecha.
@@ -99,10 +102,6 @@ El contrato inteligente aplica de manera determinista las siguientes restriccion
 
 Las pruebas están escritas de forma nativa en Rust en la ruta `blockchain/programs/blockchain/tests/test_imtbprocurement.rs`. El set de pruebas valida de forma instantánea sin requerir un nodo validador completo corriendo en segundo plano:
 
-*   **Caso Feliz:** Registro de una institución, publicación de un proceso de compra por un monto válido, y comprobación del incremento en el gasto del PAC de la institución.
-*   **Caso Límite PAC:** Intento de crear un segundo proceso que excede el límite del PAC de la institución. El contrato aborta con la firma del error `BudgetExceeded`.
-
-Para ejecutar las pruebas:
 ```bash
 cd blockchain
 cargo test
@@ -110,20 +109,36 @@ cargo test
 
 ---
 
-## 🛠️ Requisitos Previos
+## ⚙️ Configuración Requerida en Phantom Wallet
 
-Antes de clonar e instalar el proyecto, asegúrate de contar con las siguientes herramientas instaladas:
+Para interactuar con la DApp en tu entorno localnet, debes configurar tu extensión de Phantom:
 
-1.  **Rust & Cargo:** (v1.75+) `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
-2.  **Solana CLI:** (v1.18+) `sh -c "$(curl -sSfL https://release.solana.com/stable/install)"`
-3.  **Anchor CLI:** (v0.30+) `cargo install --git https://github.com/coral-xyz/anchor avm --locked --force` y luego `avm install latest`
-4.  **Node.js & NPM:** (v18.0+) [Descarga oficial](https://nodejs.org/)
+1.  **Habilitar el Modo de Desarrollador:**
+    *   Abre la extensión **Phantom**.
+    *   Ve a **Configuración** (icono de engranaje ⚙️ en la esquina inferior derecha).
+    *   Selecciona **Configuración del desarrollador** (Developer Settings).
+    *   Activa la casilla **Modo de desarrollador** (Developer Mode).
+2.  **Cambiar de Red a Localhost:**
+    *   Dentro de la misma pantalla de **Configuración del desarrollador**, selecciona **Cambiar red** (Change Network).
+    *   Selecciona **Localhost** (con la dirección `http://127.0.0.1:8899` o `http://localhost:8899`).
+3.  **Fondeo de SOL locales a tu Wallet:**
+    *   Copia la dirección de tu clave pública de Phantom (haz clic en el nombre de tu cuenta arriba en la extensión para copiarla).
+    *   Abre tu consola de comandos del sistema (con el validador local de Solana encendido) y ejecuta:
+        ```bash
+        solana airdrop 5 TU_DIRECCION_DE_PHANTOM
+        ```
+    *   Verás reflejados 5 SOL en tu Phantom en la red local. *(Nota: También puedes usar el botón de Airdrop directamente en el Dashboard de la DApp si deseas).*
+4.  **Crear Múltiples Cuentas para Probar Roles:**
+    *   En Phantom, haz clic en el menú superior izquierdo (donde dice el nombre de tu cuenta).
+    *   Haz clic en **"Añadir / Conectar cartera"** (Add/Connect Wallet).
+    *   Selecciona **"Crear nueva cuenta"** (Create a new account).
+    *   Crea al menos dos cuentas adicionales (ej: *Wallet 2* y *Wallet 3*).
+    *   Usa una cuenta como **Autoridad Pública** (para registrar la institución y crear licitaciones) y las otras cuentas como **Proveedores** (para enviar ofertas).
+    *   *Recuerda fondear con Airdrop las cuentas que vayas a usar.*
 
 ---
 
 ## 🚀 Guía de Instalación y Ejecución del Flujo Completo
-
-Sigue estos pasos detallados para montar y probar todo el entorno local.
 
 ### Paso 1: Configurar Solana en Modo Localnet y Lanzar el Validador
 
@@ -131,11 +146,7 @@ Sigue estos pasos detallados para montar y probar todo el entorno local.
     ```bash
     solana config set --url localhost
     ```
-2.  Genera una wallet por defecto (si no la tienes):
-    ```bash
-    solana-keygen new --no-bip39-passphrase
-    ```
-3.  Lanza el validador local de Solana en una terminal separada:
+2.  Lanza el validador local de Solana en una terminal separada:
     ```bash
     solana-test-validator
     ```
@@ -146,17 +157,16 @@ Sigue estos pasos detallados para montar y probar todo el entorno local.
     ```bash
     cd blockchain
     ```
-2.  Compila el programa:
+2.  Compila y despliega el programa:
     ```bash
-    anchor build
+    anchor build && anchor deploy
     ```
-3.  Despliega el programa en tu red local:
+3.  Copia el IDL compilado al frontend:
     ```bash
-    anchor deploy
+    cp target/idl/blockchain.json ../frontend/src/idl.json
     ```
-    *Nota: Guarda el Program ID resultante si cambia respecto al por defecto.*
 
-### Paso 3: Configurar y Lanzar el Backend (Rocket)
+### Paso 3: Configurar y Lanzar el Backend (Puente IPFS)
 
 1.  Dirígete a la carpeta del backend:
     ```bash
@@ -165,14 +175,12 @@ Sigue estos pasos detallados para montar y probar todo el entorno local.
 2.  Crea tu archivo `.env` configurando tu token de Pinata (deja en blanco o coméntalo si deseas usar el simulador IPFS local integrado) e identificadores de red:
     ```env
     PINATA_JWT=tu_jwt_token_de_pinata_aqui
-    SOLANA_RPC_URL=http://localhost:8899
-    PROGRAM_ID=HR3UbH45KuTanX5yiNDnPnYXr19r7mNuzUPPtj6acDJJ
     ```
 3.  Inicia el servidor Rocket:
     ```bash
     cargo run
     ```
-    *El backend estará escuchando en `http://localhost:8000`. Al arrancar, financiará automáticamente con SOL las billeteras locales de los proveedores y de la autoridad en la red local.*
+    *El backend estará escuchando en `http://localhost:8000` sirviendo como puente CORS de subida a IPFS.*
 
 ### Paso 4: Levantar la Interfaz de Usuario (Frontend React)
 
@@ -182,21 +190,26 @@ Sigue estos pasos detallados para montar y probar todo el entorno local.
     ```
 2.  Instala las dependencias y arranca el servidor de desarrollo Vite:
     ```bash
-    npm install
+    npm install && npm run dev
     ```
-3.  Arranca el servidor web local:
-    ```bash
-    npm run dev
-    ```
-    *El panel estará disponible en `http://localhost:5173`.*
+    *La DApp estará disponible en `http://localhost:5173`.*
 
 ---
 
 ## 🛡️ Instrucciones para Pruebas Manuales (E2E) en el Navegador
 
-Una vez que tengas el frontend en `http://localhost:5173`, el backend en `http://localhost:8000` y el validador en `http://localhost:8899`:
-
-1.  **Inicialización:** En la pestaña **Dashboard**, introduce el nombre de la institución (ej. *Ministerio de Telecomunicaciones*) y haz clic en **Registrar Entidad**. Esto enviará la transacción a Solana y creará el registro PDA.
-2.  **Crear Convocatoria:** Ve a la pestaña **Crear Proceso**, asigna un ID numérico (ej. `1`), introduce un presupuesto (ej. `10000` SOL), selecciona un tiempo límite corto (ej. *1 minuto*) y sube un archivo TDR. Haz clic en **Publicar Convocatoria en Solana**.
-3.  **Enviar Propuestas:** Ve a la pestaña **Procesos y Ofertas**, haz clic en el proceso recién creado en la columna izquierda. En la parte inferior, verás el formulario de envío. Selecciona enviar como **Proveedor A**, selecciona un archivo de propuesta y haz clic en **Subir y Firmar Oferta**. Repite el proceso para el **Proveedor B**.
-4.  **Auditoría y Adjudicación:** Espera a que expire el plazo límite (1 minuto). El estado del proceso cambiará a **Evaluación**. En la lista de ofertas recibidas, haz clic en **Aprobar Requisitos** para las propuestas válidas. Finalmente, en el formulario de adjudicación, selecciona al ganador (ej. *Proveedor A*), introduce un hash simulado para el presupuesto final y la puntuación, y haz clic en **Confirmar Adjudicación**.
+1.  **Conexión inicial:** Abre `http://localhost:5173` y conecta tu Phantom Wallet usando el botón **"Select Wallet"** en la cabecera.
+2.  **Registrar Institución (Autoridad):** Asegúrate de tener SOL local en tu cuenta de Phantom. En la pestaña **Dashboard**, introduce el nombre de la institución (ej. *Ministerio de Telecomunicaciones*) y haz clic en **Registrar Entidad Gubernamental**. Confirma la firma en la ventana emergente de Phantom.
+3.  **Convocar Licitación:** Ve a la pestaña **Crear Proceso** (se habrá activado tras registrar la institución). Asigna un ID numérico (ej. `1`), introduce un presupuesto (ej. `1200000` SOL), selecciona un tiempo límite corto (ej. *1 Minuto*) y sube un pliego TDR. Haz clic en **Publicar Convocatoria en Solana** y firma con tu Phantom.
+4.  **Enviar Propuestas (Proveedores):**
+    *   Abre Phantom y cambia a una cuenta diferente de proveedor (ej: *Wallet 2*).
+    *   Haz clic en la pestaña **Procesos y Ofertas**, selecciona la licitación `#1` en la lista.
+    *   En el formulario de presentación de propuestas, sube el archivo de tu propuesta y haz clic en **Subir y Firmar Oferta**. Confirma la firma en Phantom.
+    *   *Opcional:* Cambia a otra cuenta en Phantom (ej: *Wallet 3*) y envía otra oferta para simular competencia.
+5.  **Auditoría y Adjudicación:**
+    *   Espera a que expire el plazo límite (1 minuto).
+    *   Cambia de nuevo en Phantom a la cuenta de la **Autoridad** (Wallet 1).
+    *   Actualiza el detalle del proceso. El estado habrá cambiado a **Evaluación Técnica**.
+    *   Como Autoridad, evalúa las ofertas haciendo clic en **Aprobar Requisitos** (aprobando o rechazando y firmando cada acción con Phantom).
+    *   En el formulario inferior de adjudicación, selecciona la dirección ganadora, introduce los hashes CID del acta y del presupuesto definitivo de IPFS, y haz clic en **Confirmar Adjudicación**. Firma en Phantom.
+    *   ¡Listo! El proceso de compra habrá concluido y los fondos PAC quedarán devengados on-chain.
