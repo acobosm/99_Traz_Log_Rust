@@ -575,9 +575,9 @@ tr:hover td {
    SOLANA WALLET ADAPTER BUTTON CUSTOMIZATION
    ========================================================================= */
 
-.wallet-adapter-button-custom {
+.wallet-adapter-button {
   background-color: var(--accent-cyan) !important;
-  color: var(--bg-primary) !important;
+  color: #0b0f17 !important;
   font-family: var(--font-heading) !important;
   font-weight: 700 !important;
   border-radius: 8px !important;
@@ -588,12 +588,9 @@ tr:hover td {
   transition: all 0.2s ease-in-out !important;
 }
 
-.wallet-adapter-button-custom:hover {
+.wallet-adapter-button:hover {
   background-color: #00bcd4 !important;
-  transform: translateY(-1px);
-}
-
-.wallet-adapter-button-trigger {
-  background-color: var(--accent-cyan) !important;
+  color: #0b0f17 !important;
+  transform: translateY(-1px) !important;
 }
 

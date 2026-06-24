@@ -113,28 +113,32 @@ cargo test
 
 Para interactuar con la DApp en tu entorno localnet, debes configurar tu extensión de Phantom:
 
-1.  **Habilitar el Modo de Desarrollador:**
+1.  **Habilitar las redes de prueba (Testnet):**
     *   Abre la extensión **Phantom**.
     *   Ve a **Configuración** (icono de engranaje ⚙️ en la esquina inferior derecha).
-    *   Selecciona **Configuración del desarrollador** (Developer Settings).
-    *   Activa la casilla **Modo de desarrollador** (Developer Mode).
-2.  **Cambiar de Red a Localhost:**
-    *   Dentro de la misma pantalla de **Configuración del desarrollador**, selecciona **Cambiar red** (Change Network).
-    *   Selecciona **Localhost** (con la dirección `http://127.0.0.1:8899` o `http://localhost:8899`).
+    *   Selecciona **Ajustes para desarrolladores** (Developer Settings).
+    *   Activa el interruptor de **Modo Testnet** (Testnet Mode).
+2.  **Activar Solana Localnet:**
+    *   En la lista de redes de prueba que aparecerá abajo, marca la casilla de **Solana Localnet** (esto conectará Phantom a tu validador local de Solana en `http://127.0.0.1:8899`).
 3.  **Fondeo de SOL locales a tu Wallet:**
-    *   Copia la dirección de tu clave pública de Phantom (haz clic en el nombre de tu cuenta arriba en la extensión para copiarla).
+    *   Copia la dirección de tu clave pública de Solana en Phantom (haz clic en el nombre de tu cuenta arriba en la extensión para copiarla).
     *   Abre tu consola de comandos del sistema (con el validador local de Solana encendido) y ejecuta:
         ```bash
         solana airdrop 5 TU_DIRECCION_DE_PHANTOM
         ```
     *   Verás reflejados 5 SOL en tu Phantom en la red local. *(Nota: También puedes usar el botón de Airdrop directamente en el Dashboard de la DApp si deseas).*
-4.  **Crear Múltiples Cuentas para Probar Roles:**
+4.  **Crear Múltiples Cuentas para Probar Roles (E2E):**
     *   En Phantom, haz clic en el menú superior izquierdo (donde dice el nombre de tu cuenta).
     *   Haz clic en **"Añadir / Conectar cartera"** (Add/Connect Wallet).
     *   Selecciona **"Crear nueva cuenta"** (Create a new account).
-    *   Crea al menos dos cuentas adicionales (ej: *Wallet 2* y *Wallet 3*).
-    *   Usa una cuenta como **Autoridad Pública** (para registrar la institución y crear licitaciones) y las otras cuentas como **Proveedores** (para enviar ofertas).
-    *   *Recuerda fondear con Airdrop las cuentas que vayas a usar.*
+    *   Crea un total de 6 cuentas para simular todos los actores del ecosistema de contratación pública:
+        *   **Cuenta 1 (Entidad Regulatoria):** Simula el papel de la entidad de control (cuyas reglas límites de presupuesto, PAC y plazos están codificados e impuestos inmutablemente de forma directa por el Smart Contract en la blockchain).
+        *   **Cuentas 2 y 3 (Entidades Contratantes):** Utilizadas para simular dos instituciones gubernamentales distintas (ej. *Ministerio de Salud* y *Ministerio de Obras Públicas*) que registran su entidad y publican sus propios procesos y pliegos.
+        *   **Cuentas 4, 5 y 6 (Entidades Contratistas / Proveedores):** Utilizadas para postular ofertas técnicas y económicas de forma competitiva e independiente a los procesos abiertos.
+    *   *Recuerda copiar la dirección de Localnet de cada una de las 6 cuentas y fondearlas individualmente ejecutando el comando en tu consola:*
+        ```bash
+        solana airdrop 5 DIRECCION_DE_LA_CUENTA_EN_PHANTOM
+        ```
 
 ---
 
@@ -148,7 +152,7 @@ Para interactuar con la DApp en tu entorno localnet, debes configurar tu extensi
     ```
 2.  Lanza el validador local de Solana en una terminal separada:
     ```bash
-    solana-test-validator
+    solana-test-validator --gossip-port 8015 --dynamic-port-range 8020-8045
     ```
 
 ### Paso 2: Desplegar el Contrato Inteligente (Anchor)
